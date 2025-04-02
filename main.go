@@ -32,6 +32,7 @@ func main() {
 	outputScript := flag.String("o", "", "Export operations to a script. If not provided, it will flood your terminal (or pipe)")
 	needHelp := flag.Bool("h", false, "Show Help")
 	acceptAll := flag.Bool("y", false, "Confirm all operations automatically.")
+	checkSize := flag.Bool("check", false, "Check size from src to dst if file is exist")
 	flag.Parse()
 	if *needHelp {
 		flag.Usage()
@@ -56,7 +57,7 @@ func main() {
 	log.Println("Source path: ", srcDir)
 	log.Println("Dst path: ", dstDir)
 	log.Printf("%v rules loaded. ", len(rules))
-	organizer := photos.CreateOrganizer(srcDir)
+	organizer := photos.CreateOrganizer(*checkSize, srcDir)
 	organizer.Rules = rules
 	info := organizer.CollectInfo()
 	if !*acceptAll {
@@ -66,7 +67,7 @@ func main() {
 			_, _ = fmt.Scanln(&YES)
 		}
 	}
-	operations := organizer.Prepare(info, dstDir)
+	operations := organizer.Prepare(*overwrite, info, dstDir)
 	if operations == nil {
 		log.Printf("Some errr occurred while preparing. Please check logs above.")
 		return

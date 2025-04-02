@@ -6,6 +6,7 @@ import (
 )
 
 type PhotoInfo struct {
+	Size       int64
 	Date       []int
 	FileName   string
 	SourceFile string
@@ -17,7 +18,7 @@ func createPhotoInfo(source string) *PhotoInfo {
 		log.Println("WARNING: photo file name is empty: ", source)
 	}
 	return &PhotoInfo{
-		make([]int, 0), base, source,
+		-1, make([]int, 0), base, source,
 	}
 }
 

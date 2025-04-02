@@ -11,10 +11,12 @@ go build main.go
 # Usage
 
 ```aiignore
-❯ go run main.go -h
-Usage of ...:
+❯ go run main.go -h                     
+Usage of ....:
   -c string
         The config file
+  -check
+        Check size from src to dst if file is exist
   -h    Show Help
   -o string
         Export operations to a script. If not provided, it will flood your terminal (or pipe)
@@ -24,6 +26,8 @@ Usage of ...:
         Test String
   -w    Overwrite target if exist
   -y    Confirm all operations automatically.
+
+
 ```
 
 To begin with, you need to provide a configuration like this:

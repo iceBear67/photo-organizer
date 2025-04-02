@@ -7,27 +7,26 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"time"
 )
 
 type PhotoOrganizer struct {
-	events  chan *PhotoInfo
-	RootDir string
-	Rules   []*regroup.ReGroup
+	checkSize bool
+	RootDir   string
+	Rules     []*regroup.ReGroup
 }
 
-func CreateOrganizer(rootDir string) *PhotoOrganizer {
+func CreateOrganizer(checkSize bool, rootDir string) *PhotoOrganizer {
 	return &PhotoOrganizer{
-		RootDir: rootDir,
-		Rules:   make([]*regroup.ReGroup, 0),
-		events:  make(chan *PhotoInfo, 16),
+		checkSize: checkSize,
+		RootDir:   rootDir,
+		Rules:     make([]*regroup.ReGroup, 0),
 	}
 }
 
 type Ops map[string]*PhotoInfo
 
-func (o *PhotoOrganizer) Prepare(photo []*PhotoInfo, dstDir string) *Ops {
+func (o *PhotoOrganizer) Prepare(overwrite bool, photo []*PhotoInfo, dstDir string) *Ops {
 	result := make(map[string]*PhotoInfo, len(photo))
 	log.Printf("Preparing for %v photos", len(photo))
 	hasError := false
@@ -41,11 +40,26 @@ func (o *PhotoOrganizer) Prepare(photo []*PhotoInfo, dstDir string) *Ops {
 			}
 		}
 		path = filepath.Join(path, ele.FileName)
-		if _, ok := result[path]; ok {
-			log.Printf("CONFLICT FILE: %v -> %v ", ele.SourceFile, path)
-			hasError = true
+		fs, err := os.Stat(path)
+		shouldWrite := false
+		if os.IsNotExist(err) {
+			shouldWrite = true
 		} else {
-			result[path] = ele
+			if ele.Size != -1 {
+				if ele.Size != fs.Size() {
+					log.Printf("!!! Size mismatch: %v, %v (%v -> %v)", ele.SourceFile, path, ele.Size, fs.Size())
+					shouldWrite = true
+				}
+			}
+			shouldWrite = shouldWrite || overwrite
+		}
+		if shouldWrite {
+			if _, ok := result[path]; ok {
+				log.Printf("CONFLICT FILE: %v -> %v ", ele.SourceFile, path)
+				hasError = true
+			} else {
+				result[path] = ele
+			}
 		}
 	}
 	if hasError {
@@ -55,23 +69,18 @@ func (o *PhotoOrganizer) Prepare(photo []*PhotoInfo, dstDir string) *Ops {
 }
 
 func (o *PhotoOrganizer) CollectInfo() []*PhotoInfo {
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go o.traverseDirectory(o.RootDir, &wg, true)
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		wg.Wait()
-		close(o.events)
-	}()
-	result := o.selectLoop()
-	log.Printf("Collected %v photos", len(*result))
-	return *result
+	result := make([]*PhotoInfo, 0)
+	o.traverseDirectory(o.RootDir, &result)
+	checkDates(result)
+	log.Printf("Collected %v photos", len(result))
+	return result
 }
 
-func (o *PhotoOrganizer) selectLoop() *[]*PhotoInfo {
-	result := make([]*PhotoInfo, 0)
+func checkDates(pResult []*PhotoInfo) {
 	yearMedium := -1
-	for file := range o.events {
+	result := pResult
+	for _, pFile := range result {
+		file := *pFile
 		if file.Date != nil && len(file.Date) >= 1 {
 			if yearMedium == -1 {
 				yearMedium = file.Date[0]
@@ -80,16 +89,11 @@ func (o *PhotoOrganizer) selectLoop() *[]*PhotoInfo {
 				log.Println("Found images that crosses ~100 years: ", file.FileName)
 			}
 		}
-		result = append(result, file)
 	}
-	return &result
 }
 
-func (o *PhotoOrganizer) traverseDirectory(dir string, wg *sync.WaitGroup, first bool) {
+func (o *PhotoOrganizer) traverseDirectory(dir string, result *[]*PhotoInfo) {
 	log.Println("Traversing ", dir)
-	if first {
-		defer wg.Add(-1)
-	}
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		log.Printf("Failed to enumerate files in target directory %v. %v", dir, err)
@@ -98,14 +102,22 @@ func (o *PhotoOrganizer) traverseDirectory(dir string, wg *sync.WaitGroup, first
 	for _, file := range files {
 		entryPath := filepath.Join(dir, file.Name())
 		if file.IsDir() {
-			o.traverseDirectory(entryPath, wg, false)
+			o.traverseDirectory(entryPath, result)
 			continue
 		}
 		pi := o.toPhotoInfo(entryPath)
+		if o.checkSize {
+			var fi os.FileInfo
+			if fi, err = file.Info(); err != nil {
+				log.Printf("Failed to retrieve file info of %v, skipping this for size check!", entryPath)
+			} else {
+				pi.Size = fi.Size()
+			}
+		}
 		if !pi.isComplete() {
 			log.Printf("Incomplete photo info for file %v: %v", file.Name(), pi.SourceFile)
 		}
-		o.events <- pi
+		*result = append(*result, pi)
 	}
 }
 
